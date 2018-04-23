@@ -1,0 +1,193 @@
+全局事务标示符（Global Transactions Identifier）是MySQL 5.6.5复制的一个新特性，GTID事务是全局唯一性的，且一个事务对应一个GTID。一个GTID在一个服务器上只会执行一次，避免重复执行导致数据混乱或者主从不一致。
+GTID用来代替传统的复制方法，传统的复制采用binlog和pos开启复制，而GTID不再需要binlog和pos，采用master_auto_position=1来自动匹配GTID断点进行复制。
+GTID模式与传统模式的区别：在传统模式里，slave端的binlog可以不用开启；但是GTID模式下slave端的binlog必须开启，目的是记录已经执行过的GTID。
+1	GTID模式较传统模式的优势
+	简单的实现主从复制。若出现主从不一致，无需获得master的binlog_file和log_pos
+	比传统复制更加安全
+	GTID事务是连续的，当主从出现数据冲突时，可以用添加空事务的方式跳过。
+2	安装MySQL服务器
+2.1	环境准备
+分别在1.28和1.29服务器上安装好MySQL数据库。
+master	192.168.1.28:3306
+slave	192.168.1.29:3306
+2.1.1	上传MySQL安装包
+将mysql-5.6.24-linux-glibc2.5-x86_64.tar.gz上传至/opt/software目录下
+2.1.2	添加组和用户 
+[root@localhost ~]# groupadd mysql
+[root@localhost ~]# useradd -g mysql -s /sbin/nologin -d /opt/mysql mysql
+[root@localhost ~]# id mysql
+uid=500(mysql) gid=500(mysql) 组=500(mysql)
+说明：/opt/mysql为MySQL软件安装目录  
+操作附截图：
+ 
+2.2	安装MySQL数据库
+2.2.1	解压MySQL
+[root@localhost software]# tar -zxvf mysql-5.6.24-linux-glibc2.5-x86_64.tar.gz -C /opt/mysql
+[root@localhost software]# cd /opt/mysql/
+[root@localhost mysql]# ls
+mysql-5.6.24-linux-glibc2.5-x86_64
+2.2.2	创建软链接
+[root@localhost local]# ln -s /opt/mysql/mysql-5.6.24-linux-glibc2.5-x86_64/ mysql
+[root@localhost local]# ls
+bin  etc  games  include  keepalived  lib  lib64  libexec  mysql  sbin  share  src
+操作附截图：
+ 
+
+2.2.3	创建目录并赋权
+[root@localhost ~]# mkdir -p /data/mysql/mysql3306/data
+[root@localhost ~]# mkdir -p /data/mysql/mysql3306/logs
+[root@localhost ~]# mkdir -p /data/mysql/mysql3306/tmp
+[root@localhost ~]# chown -R mysql:mysql /data/mysql/mysql3306
+[root@localhost ~]# chown -R mysql:mysql /usr/local/mysql
+[root@localhost ~]# ls -ls /data/mysql/mysql3306/
+总用量 12
+4 drwxr-xr-x. 2 mysql mysql 4096 8月  17 15:53 data
+4 drwxr-xr-x. 2 mysql mysql 4096 8月  17 15:53 logs
+4 drwxr-xr-x. 2 mysql mysql 4096 8月  17 15:53 tmp
+2.2.4	添加环境变量
+在/etc/profile文件末尾添加如下内容：
+export PATH=$PATH:/usr/local/mysql/bin 
+操作附截图：
+ 
+2.2.5	初始化配置文件 
+（1）	首先查看依赖包是否存在
+[root@localhost ~]# ldd /usr/local/mysql/bin/mysqld
+	linux-vdso.so.1 =>  (0x00007fffa23ff000)
+	libpthread.so.0 => /lib64/libpthread.so.0 (0x0000003d64a00000)
+	libaio.so.1 => /lib64/libaio.so.1 (0x0000003d64200000)
+	librt.so.1 => /lib64/librt.so.1 (0x0000003d65600000)
+	libcrypt.so.1 => /lib64/libcrypt.so.1 (0x0000003d74a00000)
+	libdl.so.2 => /lib64/libdl.so.2 (0x00007fcff3c12000)
+	libstdc++.so.6 => /usr/lib64/libstdc++.so.6 (0x0000003d6b600000)
+	libm.so.6 => /lib64/libm.so.6 (0x0000003d64e00000)
+	libgcc_s.so.1 => /lib64/libgcc_s.so.1 (0x0000003d6aa00000)
+	libc.so.6 => /lib64/libc.so.6 (0x0000003d64600000)
+	/lib64/ld-linux-x86-64.so.2 (0x0000003d63e00000)
+	libfreebl3.so => /lib64/libfreebl3.so (0x0000003d74200000)
+（2）	初始化配置文件
+此步骤一定要在basedir下进行操作：
+[root@localhost tmp]# vi /etc/my.cnf
+[root@localhost tmp]# cd /usr/local/mysql/
+[root@localhost mysql]# ./scripts/mysql_install_db --user=mysql --defaults-file=/etc/my.cnf
+my.cnf配置文件如附件。注意配置文件中的参数设置规则：
+  
+[server-id]: [ip最后一位+MySQL服务端口，主从服务器的server-id参数一定不能一样！]
+如：1.28服务器：server-id = 283306      1.29服务器：server-id = 293306
+
+2.2.6	启动MySQL服务 
+[root@localhost mysql]# cp support-files/mysql.server /etc/init.d/mysql
+[root@localhost mysql]# /etc/init.d/mysql start
+Starting MySQL                                             [确定]
+操作附截图：
+ 
+到此，MySQL数据库安装成功，无密码登录。
+另外一种启动方法：/usr/local/mysql/bin/mysqld --defaults-file=/etc/my.cnf &
+2.3	登录MySQL数据库
+[root@localhost mysql]# mysql -u root -p
+Logging to file '/data/mysql/mysql3306/logs/query.log'
+Enter password: 【直接回车】
+Welcome to the MySQL monitor.  Commands end with ; or \g.
+Your MySQL connection id is 4
+Server version: 5.6.24-log MySQL Community Server (GPL)
+"root@localhost Mon Aug 17 16:23:52 2015 16:23:52 [(none)]>
+2.4	设置MySQL数据库root用户密码
+[root@localhost mysql]# mysqladmin -u root -p password "thinkive"
+Enter password:【直接回车】
+这里可以用root/thinkive登录到MySQL数据库
+2.5	清理用户
+[root@localhost mysql]# mysql -u root -p
+Logging to file '/data/mysql/mysql3306/logs/query.log'
+Enter password: thinkive
+"root@localhost Mon Aug 17 16:32:47 2015 16:32:47 [(none)]>delete from mysql.user where user!='root' or host!='localhost';
+"root@localhost Mon Aug 17 16:32:47 2015 16:32:47 [(none)]>truncate mysql.db;
+"root@localhost Mon Aug 17 16:32:47 2015 16:32:47 [(none)]>drop database test;
+"root@localhost Mon Aug 17 16:32:47 2015 16:32:47 [(none)]>flush privileges;
+2.6	设置root远程连接
+"root@localhost Mon Aug 17 16:32:39 2015 16:32:39 [(none)]> grant all privileges on *.* to root@"%" identified by 'thinkive' with grant option;
+"root@localhost Mon Aug 17 16:32:47 2015 16:32:47 [(none)]>flush privileges;
+"root@localhost Mon Aug 17 16:33:02 2015 16:33:02 [(none)]>exit
+3	基于GTID模式搭建主从环境
+3.1	配置主从为GTID模式
+"root@localhost Mon Nov 23 19:28:06 2015 19:28:06 [(none)]>show variables like '%GTID%';
++---------------------------------+------------------------------------------+
+| Variable_name                   | Value                                    |
++---------------------------------+------------------------------------------+
+| binlog_gtid_simple_recovery     | OFF                                      |
+| enforce_gtid_consistency        | ON                                       |
+| gtid_executed                   |                                          |
+| gtid_mode                       | ON                                       |
+| gtid_next                       | AUTOMATIC                                |
+| gtid_owned                      |                                          |
+| gtid_purged                     | a0475f56-8dd2-11e5-aa53-08002722e892:1-5 |
+| simplified_binlog_gtid_recovery | OFF                                      |
++---------------------------------+------------------------------------------+
+enforce_gtid_consistency、gtid_mode 显示为“ON”表示已经开启GTID模式；如果显示为“OFF”，则修改配置文件my.cnf将参数修改如下后，再重启MySQL服务器。
+#GTID
+gtid_mode = on
+enforce_gtid_consistency = on
+
+[root@node1 ~]#service mysqld restart
+          
+3.2	创建主从复制用户
+grant replication slave on *.* to 'repl'@'%' identified by 'repl';
+3.3	备份主库数据
+在主备库上分别创建备份文件目录：/data/backup
+[root@node1 backup]# /usr/local/mysql/bin/mysqldump -S /data/mysql/mysql3306/tmp/mysql.sock --master-data=2  --single-transaction -A >db3306_20151116_1.sql
+注意：如果有密码，则用下面的语句[root用户，密码为thinkive]
+/usr/local/mysql/bin/mysqldump -u root -pthinkive -S /data/mysql/mysql3306/tmp/mysql.sock --master-data=2  --single-transaction -A >db3306_20151126_1.sql
+
+3.4	恢复从库数据
+将备份数据从28主服务器传到29从服务器上：
+[root@node1 backup]# scp db3306_20151116_1.sql root@192.168.1.29:/data/backup/ 
+若从库不是新库，而是有数据的旧库，则执行（若从库为新库，则忽略此步）：
+mysql> reset master;
+
+29服务器开始恢复主库数据：
+[root@node2 backup]# time mysql -S /data/mysql/mysql3306/tmp/mysql.sock < db3306_20151116_1.sql 
+Logging to file '/data/mysql/mysql3306/logs/query.log'
+real	0m1.685s
+user	0m0.060s
+sys	0m0.014s
+3.5	从库开启同步
+"root@localhost Wed Nov 18 17:59:34 2015 17:59:34 [(none)]>change master to master_host='192.168.1.28',master_port=3306,master_user='repl',master_password='repl',master_auto_position=1;
+Query OK, 0 rows affected, 2 warnings (0.01 sec)
+ 
+"root@localhost Wed Nov 18 17:59:41 2015 17:59:41 [(none)]>start slave;
+Query OK, 0 rows affected (0.01 sec)
+3.6	验证主从数据是否一致
+在从库上运行命令：show slave status\G
+满足以下几点：Slave_IO_Running、Slave_SQL_Running都显示为“YES”
+Retrieved_Gtid_Set(从库接收到主库GTID事务) == Executed_Gtid_Set（从库当前执行到的GTID事务）
+
+"root@localhost Mon Nov 23 16:16:40 2015 16:16:40 [(none)]>show slave status\G
+*************************** 1. row ***************************
+               Slave_IO_State: Waiting for master to send event
+                  Master_Host: 192.168.1.28
+                  Master_User: repl
+                  Master_Port: 3306
+                Connect_Retry: 60
+              Master_Log_File: mybinlog.000006
+          Read_Master_Log_Pos: 8220
+               Relay_Log_File: mysql-relay-bin.000005
+                Relay_Log_Pos: 5067
+        Relay_Master_Log_File: mybinlog.000006
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+              ……
+                  Master_UUID: a0475f56-8dd2-11e5-aa53-08002722e892
+             Master_Info_File: /data/mysql/mysql3306/data/master.info
+                    SQL_Delay: 0
+          SQL_Remaining_Delay: NULL
+      Slave_SQL_Running_State: Slave has read all relay log; waiting for the slave I/O thread to update it
+           Master_Retry_Count: 86400
+                  Master_Bind: 
+      Last_IO_Error_Timestamp: 
+     Last_SQL_Error_Timestamp: 
+               Master_SSL_Crl: 
+           Master_SSL_Crlpath: 
+           Retrieved_Gtid_Set: a0475f56-8dd2-11e5-aa53-08002722e892:6-32
+            Executed_Gtid_Set: 5a888928-8dcc-11e5-aa2a-080027918f7c:1-4,
+a0475f56-8dd2-11e5-aa53-08002722e892:1-32
+                Auto_Position: 1
+1 row in set (0.00 sec)
+到此基于GTID模式的主从复制构建完成。
